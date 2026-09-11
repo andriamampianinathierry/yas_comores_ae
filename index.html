@@ -1269,6 +1269,12 @@
             <div class="multiselect-dropdown" id="filterSousDropdown"></div>
           </div>
         </div>
+        <div class="filter-group">
+          <span class="filter-label">🧑‍💻 Agent</span>
+          <select id="filterAgent" onchange="onAgentChange()">
+            <option value="">Tous les agents</option>
+          </select>
+        </div>
         <button class="btn-apply" onclick="applyFilters()">▶ Appliquer</button>
         <button class="btn-reset" onclick="resetFilters()">↺ Réinitialiser</button>
       </div>
@@ -1997,6 +2003,7 @@
         sous: selectedSous,
         mois: document.getElementById('filterMois').value,
         semaine: document.getElementById('filterSemaine').value,
+        agent: document.getElementById('filterAgent').value,
       };
     }
 
@@ -2015,6 +2022,7 @@
         const rSemaine = r.date ? getISOWeekKey1(r.date) : '';
         if (rSemaine !== f.semaine) return false;
       }
+      if (exclude !== 'agent' && f.agent && r.agent !== f.agent) return false;
       return true;
     }
 
@@ -2034,7 +2042,8 @@
       const ze = document.getElementById('filterZone');
       const me = document.getElementById('filterMois');
       const we = document.getElementById('filterSemaine');
-      const prevPole = pe.value, prevZone = ze.value, prevMois = me.value, prevSemaine = we.value;
+      const ae = document.getElementById('filterAgent');
+      const prevPole = pe.value, prevZone = ze.value, prevMois = me.value, prevSemaine = we.value, prevAgent = ae.value;
 
       // Pôle
       const poleValues = [...new Set(rowsForFacet('pole').map(r => r.pole))].filter(Boolean).sort();
@@ -2074,6 +2083,18 @@
         we.appendChild(o);
       });
       we.value = semaineValues.includes(prevSemaine) ? prevSemaine : '';
+
+      // Agent
+      const agentValues = [...new Set(rowsForFacet('agent').map(r => r.agent))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr'));
+      ae.innerHTML = '<option value="">Tous les agents</option>';
+      agentValues.forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; ae.appendChild(o); });
+      ae.value = agentValues.includes(prevAgent) ? prevAgent : '';
+    }
+
+    // ── Changement d'agent : met à jour en cascade tous les autres filtres ────────
+    function onAgentChange() {
+      updateAllFilterOptions();
+      applyFilters();
     }
 
     function populateFilters() {
@@ -2150,11 +2171,13 @@
       const mois = document.getElementById('filterMois').value;
       const semaine = document.getElementById('filterSemaine').value;
       const zone = document.getElementById('filterZone').value;
+      const agent = document.getElementById('filterAgent').value;
 
       filtered = RAW_DATA.filter(r => {
         if (pole && r.pole !== pole) return false;
         if (sous.length && !sous.includes(r.sous)) return false;
         if (zone && !matchesFileFilter(r, zone)) return false;
+        if (agent && r.agent !== agent) return false;
 
         // Filtre par mois (si sélectionné)
         if (mois) {
@@ -2189,6 +2212,7 @@
       document.getElementById('filterMois').value = '';
       document.getElementById('filterSemaine').value = '';
       document.getElementById('filterZone').value = '';
+      document.getElementById('filterAgent').value = '';
 
       // Repeuple toutes les listes de filtres (cascade) sans aucun critère actif
       updateAllFilterOptions();
