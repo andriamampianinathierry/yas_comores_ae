@@ -1395,6 +1395,33 @@
         </div>
       </div>
 
+      <div class="section-title">Détail par agent</div>
+      <div class="panel full-width-panel">
+        <div class="panel-header">
+          <span class="panel-title">📋 KPI par agent</span>
+          <div class="panel-header-actions">
+            <span class="panel-badge" id="agentBadge">—</span>
+            <button class="btn-export" onclick="exportTableToCSV('tableAgentSummary','KPI_agents')" title="Exporter en CSV">⬇</button>
+          </div>
+        </div>
+        <div class="panel-body table-scroll" style="padding:0">
+          <table class="dash-table" id="tableAgentSummary">
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th class="num">Appels traités</th>
+                <th class="num">Moy. DMT</th>
+                <th class="num">Qualité de service (QS)</th>
+                <th class="num">QS &lt; 20s</th>
+                <th class="num">Nbr FCR</th>
+                <th class="num">FCR</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyAgentSummary"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- ── TABLEAU COMPARAISON JOURNALIÈRE — PAGE 1 ── -->
       <div class="section-title">Comparaison journalière</div>
       <div class="panel full-width-panel">
@@ -1549,6 +1576,9 @@
       dureePriseEnCharge: ['dureepriseencharge', 'duree_prise_en_charge', 'priseencharge', 'prise_en_charge'],
       qualif: ['nomquai', 'nom_quai', 'nomqualification', 'nom_qualification', 'nomqualif', 'qualification', 'qualif', 'qualifie'],
       agent: ['idagent', 'id_agent', 'agentid', 'agent'],
+      // Colonne "Nom Agent" (nom affiché) — distincte de la colonne ID Agent ci-dessus.
+      // Priorité au nom sur l'ID pour l'affichage (filtre Agent + tableau KPI par agent).
+      agentNom: ['nomagent', 'nom_agent', 'nomdelagent', 'agentnom', 'nomprenomagent', 'nom_prenom_agent', 'nomcompletagent', 'nomcomplet', 'fullname', 'agentname', 'nomdelagenttraiteur', 'agenttraiteur'],
       mois: ['mois', 'month'],
     };
 
@@ -1809,7 +1839,11 @@
         const sous = toText(get('sous')) || 'Non défini';
         const file = toText(get('file')) || '';
         const requal = toText(get('requal')) || '';
-        const agent = toText(get('agent')) || '';
+        // Agent affiché : on privilégie la colonne "Nom Agent" (nom lisible) si elle est détectée
+        // dans le fichier source ; à défaut on retombe sur la colonne ID Agent (comportement précédent).
+        const agentId = toText(get('agent')) || '';
+        const agentNomVal = toText(get('agentNom')) || '';
+        const agent = agentNomVal || agentId;
         const mois = toText(get('mois')) || '';
 
         // ── Qualification ──
@@ -2463,6 +2497,47 @@
       });
     }
 
+    // ─── TABLEAU KPI PAR AGENT — mêmes colonnes/calculs que "KPI par sous-campagne", groupées par agent ───
+    // Agents volontairement masqués de ce tableau (ex: comptes techniques/non-opérationnels).
+    const AGENTS_MASQUES = ['RATOLOJANAHARY Lazasoa', 'RAMAROSAHANINA Rado'];
+    function renderTableAgentSummary(data) {
+      const g = {};
+      data.forEach(r => {
+        const label = r.agent || 'Non défini';
+        if (AGENTS_MASQUES.includes(label)) return;
+        if (!label || label === 'Non défini' || label === '0') return;
+        if (!g[label]) g[label] = { entrants: 0, traites: 0, sl20: 0, fcr: 0, dmtW: 0, dmtT: 0 };
+        const d = g[label];
+        d.entrants += r.entrants;
+        d.traites += r.traites;
+        d.sl20 += r.sl20;
+        d.fcr += r.fcr;
+        if (r.dmt > 0) { d.dmtW += r.dmt * (r.traites || 1); d.dmtT += (r.traites || 1); }
+      });
+      const keys = Object.keys(g).sort((a, b) => g[b].traites - g[a].traites);
+      document.getElementById('agentBadge').textContent = keys.length + ' agent(s)';
+      const tbody = document.getElementById('tbodyAgentSummary');
+      tbody.innerHTML = '';
+      if (!keys.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aucune donnée</td></tr>'; return; }
+      keys.forEach(k => {
+        const d = g[k];
+        const dmtMoy = d.dmtT ? Math.round(d.dmtW / d.dmtT) : null;
+        const qsPct = d.entrants > 0 ? (d.traites / d.entrants * 100).toFixed(1) : null;
+        const slPct = d.traites && d.sl20 > 0 ? (d.sl20 / d.traites * 100).toFixed(1) : null;
+        const fcrPct = d.traites && d.fcr > 0 ? (d.fcr / d.traites * 100).toFixed(1) : null;
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td><strong>${k}</strong></td>` +
+          `<td class="num-grey">${d.traites.toLocaleString('fr-FR')}</td>` +
+          `<td class="num-grey">${dmtMoy === null ? '<span class="num-grey">—</span>' : `<span class="num-grey">${fmtHHMMSS(dmtMoy)}</span>`}</td>` +
+          `<td class="num">${qsPct !== null ? pillQS(parseFloat(qsPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
+          `<td class="num">${slPct !== null ? pillQS(parseFloat(slPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
+          `<td class="num-grey">${d.fcr.toLocaleString('fr-FR')}</td>` +
+          `<td class="num">${fcrPct !== null ? pillQS(parseFloat(fcrPct)) : '<span class="pill pill-amber">—</span>'}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
     // ─── GRAPHIQUE MENSUEL ────────────────────────────────────────────────────────
     function renderChart(data) {
       const MOIS_FR = ['Janv.', 'Févr.', 'Mars', 'Avr.', 'Mai', 'Juin', 'Juil.', 'Août', 'Sept.', 'Oct.', 'Nov.', 'Déc.'];
@@ -2986,7 +3061,7 @@
       }).join('');
     }
 
-    function renderAll() { renderKPIs(computeKPIs(filtered)); renderTableSous(filtered); renderChart(filtered); renderDailyTable1(filtered); renderMonthlyTable1(filtered); renderWeeklyTable1(filtered); }
+    function renderAll() { renderKPIs(computeKPIs(filtered)); renderTableSous(filtered); renderTableAgentSummary(filtered); renderChart(filtered); renderDailyTable1(filtered); renderMonthlyTable1(filtered); renderWeeklyTable1(filtered); }
     function showLoading(msg) { document.getElementById('loadingMsg').textContent = msg; document.getElementById('loadingOverlay').classList.remove('hidden'); }
     function hideLoading() { document.getElementById('loadingOverlay').classList.add('hidden'); }
     function showError(msg) { const el = document.getElementById('errorBanner'); el.innerHTML = '⚠️ ' + msg; el.classList.add('show'); }
