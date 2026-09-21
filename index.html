@@ -1411,6 +1411,7 @@
                 <th>Agent</th>
                 <th class="num">Appels traités</th>
                 <th class="num">Moy. DMT</th>
+                <th class="num">ACW</th>
                 <th class="num">Qualité de service (QS)</th>
                 <th class="num">QS &lt; 20s</th>
                 <th class="num">Nbr FCR</th>
@@ -1418,6 +1419,37 @@
               </tr>
             </thead>
             <tbody id="tbodyAgentSummary"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TABLEAU DÉTAIL PAR HEURE ── -->
+      <div class="section-title">Détail par heure</div>
+      <div class="panel full-width-panel">
+        <div class="panel-header">
+          <span class="panel-title">🕐 KPI par heure</span>
+          <div class="panel-header-actions">
+            <span class="panel-badge" id="heureBadge">—</span>
+            <button class="btn-export" onclick="exportTableToCSV('tableHeure','KPI_par_heure')" title="Exporter en CSV">⬇</button>
+          </div>
+        </div>
+        <div class="panel-body table-scroll" style="padding:0">
+          <table class="dash-table" id="tableHeure">
+            <thead>
+              <tr>
+                <th>Heure</th>
+                <th class="num">Appels entrants</th>
+                <th class="num">Appels traités</th>
+                <th class="num">Appels perdus</th>
+                <th class="num">Taux perdus (%)</th>
+                <th class="num">Moy. DMT</th>
+                <th class="num">Qualité de service (QS)</th>
+                <th class="num">QS &lt; 20s</th>
+                <th class="num">Nbr FCR</th>
+                <th class="num">FCR</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyHeure"></tbody>
           </table>
         </div>
       </div>
@@ -1570,6 +1602,7 @@
       sl10: ['sl10sec', 'sl10', 'sl_10', 'sla10', 'sl<10', 'sous10'],
       fcr: ['newfcr', 'new_fcr', 'fcr', 'firstcall', 'firstcontact'],
       dmt: ['dmt', 'dureetraitement', 'duree_traitement', 'tht', 'aht'],
+      heure: ['heureappel', 'heure_appel', 'heuredebut', 'heure_debut', 'heurereception', 'heure_reception', 'tranchehoraire', 'creneauhoraire', 'creneau', 'hourofcall', 'heure', 'hour'],
       dureePostTravail: ['dureeposttravailagent', 'duree_post_travail_agent', 'duree post-travail agent', 'posttravailagent', 'duree_post_travail'],
       dureeAppel: ['dureeappel', 'duree_appel', 'duree appel'],
       dmpc: ['dureepc', 'duree_pc', 'dmpc', 'postcall', 'acw', 'aftercall', 'wrapup'],
@@ -1797,6 +1830,44 @@
     }
 
     // ─── TRAITEMENT DES DONNÉES ───────────────────────────────────────────────────
+    function extractHeure(rawDate, rawHeure) {
+      const parseHourStr = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        const s = cleanStr(raw);
+        if (!s) return null;
+        // HH:MM(:SS) ou HHhMM
+        const m = s.match(/^(\d{1,2})\s*[:hH]\s*(\d{0,2})/);
+        if (m) {
+          const h = parseInt(m[1], 10);
+          if (h >= 0 && h <= 23) return h;
+        }
+        // Sérial Excel fractionnaire (fraction de journée, ex : 0.354166 = 08:30)
+        const f = parseFloat(s.replace(',', '.'));
+        if (!isNaN(f) && f >= 0 && f < 1) {
+          return Math.min(23, Math.floor(f * 24));
+        }
+        // Nombre entier simple (0-23) représentant directement l'heure
+        if (/^\d{1,2}$/.test(s)) {
+          const h = parseInt(s, 10);
+          if (h >= 0 && h <= 23) return h;
+        }
+        return null;
+      };
+
+      const fromHeureCol = parseHourStr(rawHeure);
+      if (fromHeureCol !== null) return fromHeureCol;
+
+      if (rawDate) {
+        const s = cleanStr(rawDate);
+        const m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (m) {
+          const h = parseInt(m[1], 10);
+          if (h >= 0 && h <= 23) return h;
+        }
+      }
+      return null;
+    }
+
     function processData(rows) {
       // Remise à zéro totale — aucune donnée en cache
       RAW_DATA = [];
@@ -1845,6 +1916,7 @@
         const agentNomVal = toText(get('agentNom')) || '';
         const agent = agentNomVal || agentId;
         const mois = toText(get('mois')) || '';
+        const heure = extractHeure(rawDate, get('heure'));
 
         // ── Qualification ──
         const qualifRaw = toText(get('qualif')).toUpperCase().trim();
@@ -1857,7 +1929,7 @@
         }
 
         RAW_DATA.push({
-          date: isoDate, pole, sous, file, requal, agent, mois,
+          date: isoDate, pole, sous, file, requal, agent, mois, heure,
           entrants, traites, sl20, sl10, fcr, dmt, dureePostTravail, dureeAppel, dmpc, dureePriseEnCharge,
           qualifie: isQualifie ? 1 : 0,
         });
@@ -2506,22 +2578,24 @@
         const label = r.agent || 'Non défini';
         if (AGENTS_MASQUES.includes(label)) return;
         if (!label || label === 'Non défini' || label === '0') return;
-        if (!g[label]) g[label] = { entrants: 0, traites: 0, sl20: 0, fcr: 0, dmtW: 0, dmtT: 0 };
+        if (!g[label]) g[label] = { entrants: 0, traites: 0, sl20: 0, fcr: 0, dmtW: 0, dmtT: 0, acwW: 0, acwT: 0 };
         const d = g[label];
         d.entrants += r.entrants;
         d.traites += r.traites;
         d.sl20 += r.sl20;
         d.fcr += r.fcr;
         if (r.dmt > 0) { d.dmtW += r.dmt * (r.traites || 1); d.dmtT += (r.traites || 1); }
+        if (r.dureePostTravail > 0) { d.acwW += r.dureePostTravail * (r.traites || 1); d.acwT += (r.traites || 1); }
       });
       const keys = Object.keys(g).sort((a, b) => g[b].traites - g[a].traites);
       document.getElementById('agentBadge').textContent = keys.length + ' agent(s)';
       const tbody = document.getElementById('tbodyAgentSummary');
       tbody.innerHTML = '';
-      if (!keys.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Aucune donnée</td></tr>'; return; }
+      if (!keys.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Aucune donnée</td></tr>'; return; }
       keys.forEach(k => {
         const d = g[k];
         const dmtMoy = d.dmtT ? Math.round(d.dmtW / d.dmtT) : null;
+        const acwMoy = d.acwT ? Math.round(d.acwW / d.acwT) : null;
         const qsPct = d.entrants > 0 ? (d.traites / d.entrants * 100).toFixed(1) : null;
         const slPct = d.traites && d.sl20 > 0 ? (d.sl20 / d.traites * 100).toFixed(1) : null;
         const fcrPct = d.traites && d.fcr > 0 ? (d.fcr / d.traites * 100).toFixed(1) : null;
@@ -2530,6 +2604,7 @@
           `<td><strong>${k}</strong></td>` +
           `<td class="num-grey">${d.traites.toLocaleString('fr-FR')}</td>` +
           `<td class="num-grey">${dmtMoy === null ? '<span class="num-grey">—</span>' : `<span class="num-grey">${fmtHHMMSS(dmtMoy)}</span>`}</td>` +
+          `<td class="num-grey">${acwMoy === null ? '<span class="num-grey">—</span>' : `<span class="num-grey">${fmtHHMMSS(acwMoy)}</span>`}</td>` +
           `<td class="num">${qsPct !== null ? pillQS(parseFloat(qsPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
           `<td class="num">${slPct !== null ? pillQS(parseFloat(slPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
           `<td class="num-grey">${d.fcr.toLocaleString('fr-FR')}</td>` +
@@ -2538,7 +2613,49 @@
       });
     }
 
-    // ─── GRAPHIQUE MENSUEL ────────────────────────────────────────────────────────
+    // ─── TABLEAU KPI PAR HEURE ────────────────────────────────────────────────────
+    function renderTableHeure(data) {
+      const g = {};
+      data.forEach(r => {
+        if (r.heure === null || r.heure === undefined) return;
+        const key = String(r.heure).padStart(2, '0');
+        if (!g[key]) g[key] = { entrants: 0, traites: 0, sl20: 0, fcr: 0, dmtW: 0, dmtT: 0 };
+        const d = g[key];
+        d.entrants += r.entrants;
+        d.traites += r.traites;
+        d.sl20 += r.sl20;
+        d.fcr += r.fcr;
+        if (r.dmt > 0) { d.dmtW += r.dmt * (r.traites || 1); d.dmtT += (r.traites || 1); }
+      });
+      const keys = Object.keys(g).sort();
+      document.getElementById('heureBadge').textContent = keys.length + ' tranche(s) horaire(s)';
+      const tbody = document.getElementById('tbodyHeure');
+      tbody.innerHTML = '';
+      if (!keys.length) { tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Aucune colonne heure détectée dans la source</td></tr>'; return; }
+      keys.forEach(k => {
+        const d = g[k];
+        const perdus = Math.max(0, d.entrants - d.traites);
+        const tauxPerd = d.entrants > 0 ? (perdus / d.entrants * 100) : 0;
+        const dmtMoy = d.dmtT ? Math.round(d.dmtW / d.dmtT) : null;
+        const qsPct = d.entrants > 0 ? (d.traites / d.entrants * 100).toFixed(1) : null;
+        const slPct = d.traites && d.sl20 > 0 ? (d.sl20 / d.traites * 100).toFixed(1) : null;
+        const fcrPct = d.traites && d.fcr > 0 ? (d.fcr / d.traites * 100).toFixed(1) : null;
+        const tauxCls = tauxPerd < 5 ? 'pill-green' : tauxPerd < 15 ? 'pill-amber' : 'pill-red';
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td><strong>${k}h</strong></td>` +
+          `<td class="num-grey">${d.entrants.toLocaleString('fr-FR')}</td>` +
+          `<td class="num-grey">${d.traites.toLocaleString('fr-FR')}</td>` +
+          `<td class="num-grey">${perdus > 0 ? perdus.toLocaleString('fr-FR') : '<span style="color:#666;font-family:\'JetBrains Mono\',monospace;font-size:0.76rem;">0</span>'}</td>` +
+          `<td class="num"><span class="pill ${tauxCls}">${tauxPerd.toFixed(1)}%</span></td>` +
+          `<td class="num-grey">${dmtMoy === null ? '<span class="num-grey">—</span>' : `<span class="num-grey">${fmtHHMMSS(dmtMoy)}</span>`}</td>` +
+          `<td class="num">${qsPct !== null ? pillQS(parseFloat(qsPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
+          `<td class="num">${slPct !== null ? pillQS(parseFloat(slPct)) : '<span class="pill pill-amber">—</span>'}</td>` +
+          `<td class="num-grey">${d.fcr.toLocaleString('fr-FR')}</td>` +
+          `<td class="num">${fcrPct !== null ? pillQS(parseFloat(fcrPct)) : '<span class="pill pill-amber">—</span>'}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
     function renderChart(data) {
       const MOIS_FR = ['Janv.', 'Févr.', 'Mars', 'Avr.', 'Mai', 'Juin', 'Juil.', 'Août', 'Sept.', 'Oct.', 'Nov.', 'Déc.'];
       const byMonth = {};
@@ -3061,7 +3178,7 @@
       }).join('');
     }
 
-    function renderAll() { renderKPIs(computeKPIs(filtered)); renderTableSous(filtered); renderTableAgentSummary(filtered); renderChart(filtered); renderDailyTable1(filtered); renderMonthlyTable1(filtered); renderWeeklyTable1(filtered); }
+    function renderAll() { renderKPIs(computeKPIs(filtered)); renderTableSous(filtered); renderTableAgentSummary(filtered); renderTableHeure(filtered); renderChart(filtered); renderDailyTable1(filtered); renderMonthlyTable1(filtered); renderWeeklyTable1(filtered); }
     function showLoading(msg) { document.getElementById('loadingMsg').textContent = msg; document.getElementById('loadingOverlay').classList.remove('hidden'); }
     function hideLoading() { document.getElementById('loadingOverlay').classList.add('hidden'); }
     function showError(msg) { const el = document.getElementById('errorBanner'); el.innerHTML = '⚠️ ' + msg; el.classList.add('show'); }
